@@ -1,0 +1,99 @@
+---
+title: "Metro_Bike_Share_Trip_Data_Analysis"
+author: "Yinuo Sun"
+date: "April 27, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+library(lattice)
+library(rlang)
+library(ggplot2)
+library(data.table)
+library(dplyr)
+library(plotly)
+library(caret)
+library(lubridate)
+library(httpuv)
+```
+
+# Data Preprocessing
+
+```{r}
+
+rawdata = read.csv("metro-bike-share-trip-data.csv")
+#Summary Raw Data
+glimpse(rawdata)
+```
+```{r}
+#Missing Values 
+sapply(rawdata, function(x) sum(is.na(x)))
+```
+```{r}
+#New dataset without missing values
+nonadataset = rawdata[complete.cases(rawdata),]
+
+# Calculate distance in kilometers between two points
+library(geodist)
+library(geosphere)
+p1 = nonadataset[,c('Starting.Station.Longitude','Starting.Station.Latitude')]
+p2 = nonadataset[,c('Ending.Station.Longitude','Ending.Station.Latitude')]
+# Default unit = meters
+distance.between.stations=distVincentyEllipsoid(p1,p2)
+nonadataset = cbind(nonadataset,distance.between.stations)
+temdata = nonadataset
+```
+
+# Data Analysis for Travel Distance by Different Tickey's Type
+
+```{r}
+#Data Analysis
+#Time.spend: Travel Time == Duration
+library(tidyr)
+temdata = temdata %>%
+  separate(Start.Time,c("Start.date","Start.time"),"T") %>%
+  separate(End.Time,c("End.date","End.time"),"T") %>%
+  mutate(Start.Time = as.POSIXct(paste(Start.date,Start.time, sep=" ")),
+         End.Time = as.POSIXct(paste(End.date,End.time, sep=" ")),
+         Time.spend = difftime(End.Time,Start.Time,units="secs"))
+
+#Labeling Plan.Duration
+temdata = temdata %>%
+  mutate(Plan.Duration = ordered(Plan.Duration,
+                                 levels = c(0,30,365),
+                                 labels = c("Single Ride", "Monthly", "Yearly")))
+#Analysis for Customer's Behaviors on Passholder.Type
+bike_data_group <- temdata %>%
+  group_by(Trip.Route.Category,Passholder.Type,Plan.Duration) %>%
+  summarize(average_duration = round(mean(Duration)))
+bike_data_group %>%
+  subset(Trip.Route.Category == 'One Way') %>%
+  plot_ly(x=~Passholder.Type, y=~average_duration,type = 'bar', name='One Way') %>%
+  add_trace(data=subset(bike_data_group,Trip.Route.Category == 'Round Trip'),x=~Passholder.Type,y=~average_duration,name='Round Trip')
+bike_data_group
+
+```
+
+```{r}
+
+#Record Count by Map
+#Find out Data is not clean
+#Longitude has 0 value in the column.
+library(leaflet)
+levels(as.factor(temdata$Starting.Station.Latitude))
+levels(as.factor(temdata$Starting.Station.Longitude))
+#Record Count Cluster Mapping 
+temdata %>%
+  filter(Starting.Station.Longitude != 0) %>%
+  select(lat=Starting.Station.Latitude,lng=Starting.Station.Longitude) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addMarkers(clusterOptions = markerClusterOptions())
+```
+
+
